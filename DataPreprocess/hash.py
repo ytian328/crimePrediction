@@ -2,8 +2,10 @@ from pyproj import Proj, transform
 import geohash
 from osgeo import ogr
 from datetime import datetime
+import os
 
-class hash:
+
+class Hash:
     def __init__(self):
         self.neighbor = [['p0r21436x8zb9dcf5h7kjnmqesgutwvy', 'bc01fg45238967deuvhjyznpkmstqrwx'],
                     ['14365h7k9dcfesgujnmqp0r2twvyx8zb', '238967debc01fg45kmstqrwxuvhjyznp'],
@@ -16,8 +18,13 @@ class hash:
                   ['0145hjnp', '028b']]
 
         self.base = '0123456789bcdefghjkmnpqrstuvwxyz'
-        return
 
+        self.burglary = {'BURGP','PROWLP'}
+
+        self.street_crime = {'ASSLTP','ASSLTW','DISTP','DISTW','GANG','ROBP','ROBW','SHOOTW','SHOTS','STABW','THRETP','THRETW','VICE'}
+
+        self.auto_theft = {'RSTLN','VEHSTP','VEHREC'}
+        return 0
 
     def xy_to_coord(self, x, y):
         """
@@ -31,7 +38,6 @@ class hash:
         lng, lat = transform(inProj, outProj, x, y)
         return lng, lat
 
-
     def encode(self, x, y, precision = 12):
         """
         generate geohash value from x,y cooridnate, NAD 1983 HARN StatePlane Oregon North FIPS 3601 Feet Intl
@@ -43,6 +49,13 @@ class hash:
         lng, lat = self.xy_to_coord(x,y)
         return geohash.encode(lat, lng, precision)
 
+    def decode(self, value):
+        """
+        decode geohash value to latitude, longitude
+        :param value: geohash value to be decoded
+        :return: latitude, longitude pair for the center of the given geohash
+        """
+        return geohash.decode(value)
 
     def add_geohash(self, file, precision=12):
         """
@@ -63,14 +76,38 @@ class hash:
         while feature:
             x = layer[i].GetField('x_coordina')
             y = layer[i].GetField('y_coordina')
-            i=i+1
+            i += 1
             hashcode = self.encode(x, y, precision)
             feature.SetField('geohash', hashcode)
             layer.SetFeature(feature)
             feature = layer.GetNextFeature()
         return 0
 
+    @staticmethod
+    def add_crime_tag(self, file):
+        source = ogr.Open(file, update=True)
+        layer = source.GetLayer()
+        if layer.FindFieldIndex('crime_tag', True) == -1:
+            new_field = ogr.FieldDefn('crime_tag', ogr.OFTString)
+            layer.CreateField(new_field)
+        feature = layer.GetNextFeature()
+        i = 0
+        while feature:
+            crime = layer[i].GetField('final_case')
+            if crime in self.burglary:
+                feature.SetField('crime_tag', 'burglary')
+            elif crime in self.auto_theft:
+                feature.SetField('crime_tag', 'auto_theft')
+            elif crime in self.street_crime:
+                feature.SetField('crime_tag', 'street_crime')
+            else:
+                feature.SetField('crime_tag', 'other')
+            layer.SetFeature(feature)
+            i += 1
+            feature = layer.GetNextFeature()
+        return 0
 
+    @staticmethod
     def delete_field(self, file, field_name):
         """
         delete specified field from shapefile, if exists
@@ -88,7 +125,7 @@ class hash:
         print('field is deleted')
         return 0
 
-
+    @staticmethod
     def print_fields(self, file):
         """
         print all field names of the specified shapefile
@@ -104,7 +141,7 @@ class hash:
         print(field_names)
         return 0
 
-
+    @staticmethod
     def add_field(self, file, field_name, field_type = ogr.OFTString):
         """
         add specified field to shape file
@@ -123,7 +160,7 @@ class hash:
         print("field already exist, no new field is added")
         return -1
 
-
+    @staticmethod
     def days_diff(self, d1, d2):
         """
         calculate date difference
@@ -135,7 +172,7 @@ class hash:
         d2 = datetime.strptime(d2, '%m/%d/%Y')
         return (d1-d2).days
 
-
+    @staticmethod
     def date_geo_type(self, shapefile, textfile):
         source = ogr.Open(shapefile, update=False)
         layer = source.GetLayer()
@@ -150,19 +187,48 @@ class hash:
         out_put = open(textfile, 'w')
 
         for line in layer:
+            if(line.GetField('occ_date') == None or line.GetField('geohash') == None or line.GetField('final_case') == None):
+                continue
+
             out_put.write(line.GetField('occ_date'))
             out_put.write('_')
             out_put.write(line.GetField('geohash'))
             out_put.write('_')
             type = line.GetField('final_case')
-            if len(type) >= 4:
-                out_put.write(type[:4])
-            else:
-                out_put.write(type)
+            out_put.write(type)
             out_put.write('\n')
         out_put.close()
         return 0
 
+    @staticmethod
+    def crime_type(self, shapefile, textfile):
+        source = ogr.Open(shapefile, update=False)
+        layer = source.GetLayer()
+        if layer.FindFieldIndex('CALL_GROUP', True) == -1:
+            return -1
+        if layer.FindFieldIndex('CASE_DESC', True) == -1:
+            return -2
+        if layer.FindFieldIndex('final_case', True) == -1:
+            print("fields are missing. fail to generate text file")
+            return -3
+
+        out_put = open(textfile, 'w')
+
+        for line in layer:
+            if(line.GetField('CALL_GROUP') == None or line.GetField('CASE_DESC') == None or line.GetField('final_case') == None):
+                continue
+
+            out_put.write(line.GetField('CALL_GROUP').replace(' ',''))
+            out_put.write('_')
+            out_put.write(line.GetField('final_case').replace(' ',''))
+            out_put.write('_')
+            type = line.GetField('CASE_DESC').replace(' ','')
+            out_put.write(type)
+            out_put.write('\n')
+        out_put.close()
+        return 0
+
+    @staticmethod
     def geo_neighbor(self, geohash, direction):
         """
         calculate the neighbor of geohash on direction
@@ -185,8 +251,56 @@ class hash:
         # append letter for direction to parent
         return parent + self.base[self.neighbor[dir][type].index(lastCh)]
 
+    @staticmethod
+    def all_area(self, directory, output_file):
+
+        area = set()
+        for root, dirs, files in os.walk(directory):
+            for name in dirs:
+                file = directory + '/' + name + '/' + name + '.shp'
+                source = ogr.Open(file, update=True)
+                layer = source.GetLayer()
+                for line in layer:
+                    area.add(line.GetField('geohash'))
+
+        out_put = open(output_file, 'w')
+        for element in area:
+            out_put.write(element)
+            out_put.write('\n')
+
+    @staticmethod
+    def geohash_to_grid_point(self, geohash_list_file, output_file):
+        hash_file = geohash_list_file
+        with open(hash_file) as f:
+            content = f.readlines()
+        geo_dict = {}
+        for i in range(0, len(content)):
+            cur_code = content[i][:6]
+            geo_dict.update({cur_code: geohash.decode(cur_code)})
+
+        latitude = set()
+        longitude = set()
+        for key in geo_dict:
+            latitude.add(geo_dict[key][0])
+            longitude.add(geo_dict[key][1])
+
+        latitude = list(latitude)
+        latitude.sort()
+        longitude = list(longitude)
+        longitude.sort()
+
+        output = open(output_file, 'w')
+        for key in geo_dict:
+            lat = geo_dict[key][0]
+            lng = geo_dict[key][1]
+            output.write(key)
+            output.write('\t')
+            output.write(str(latitude.index(lat)))
+            output.write('\t')
+            output.write(str(longitude.index(lng)))
+            output.write('\n')
+
+        return 0
 
 
-my_hash = hash()
-file = "/home/tianxiaopian/Desktop/NIJ2017_FEB28/NIJ2017_FEB28.shp"
-my_hash.add_geohash(file,6)
+
